@@ -1,0 +1,144 @@
+name: Kizzxx APK Builder
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: "Nama aplikasi"
+        required: true
+        default: "Kizzxx App"
+      package_id:
+        description: "Package ID"
+        required: true
+        default: "com.kizzxx.app"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Create Android project
+        env:
+          APP_NAME: ${{ inputs.app_name }}
+          APP_ID: ${{ inputs.package_id }}
+        run: |
+          mkdir -p app/src/main/java/com/kizzxx/app
+          mkdir -p app/src/main/assets/www
+
+          if [ -d site ] && [ "$(ls -A site)" ]; then
+            cp -R site/. app/src/main/assets/www/
+          else
+            echo '<h1>Kizzxx App</h1><p>Upload website files to the site folder.</p>' > app/src/main/assets/www/index.html
+          fi
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "KizzxxAPK"
+          include ':app'
+          EOF
+
+          echo "plugins { id 'com.android.application' version '8.7.3' apply false }" > build.gradle
+
+          cat > app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.kizzxx.app'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId project.findProperty('APP_ID') ?: 'com.kizzxx.app'
+                  minSdk 23
+                  targetSdk 35
+                  versionCode 1
+                  versionName '1.0'
+                  resValue 'string', 'app_name', '"' + (project.findProperty('APP_NAME') ?: 'Kizzxx App') + '"'
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true">
+                  <activity
+                      android:name="com.kizzxx.app.MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/kizzxx/app/MainActivity.java <<'EOF'
+          package com.kizzxx.app;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  WebView web = new WebView(this);
+                  web.getSettings().setJavaScriptEnabled(true);
+                  web.getSettings().setDomStorageEnabled(true);
+                  web.getSettings().setAllowFileAccess(true);
+                  web.setWebViewClient(new WebViewClient());
+                  setContentView(web);
+                  web.loadUrl("file:///android_asset/www/index.html");
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle --no-daemon assembleDebug -PAPP_ID="${{ inputs.package_id }}" -PAPP_NAME="${{ inputs.app_name }}"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kizzxx-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
